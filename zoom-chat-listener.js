@@ -7,7 +7,6 @@ if (!ZOOM_LINK) {
   process.exit(1);
 }
 
-// Parse Zoom meeting ID and password from URL
 function parseZoomLink(link) {
   const match = link.match(/\/j\/(\d+)(?:\?pwd=([\w-]+))?/);
   if (!match) throw new Error('Invalid Zoom link');
@@ -28,37 +27,35 @@ async function main() {
   const joinUrl = `https://zoom.us/wc/join/${meetingId}?pwd=${password}`;
   await page.goto(joinUrl);
 
-  // Skip camera/mic permission dialog
-  try {
-    await page.waitForSelector(
-      'span.pepc-permission-dialog__footer-button',
-      { timeout: 5000 }
-    );
-    await page.click('span.pepc-permission-dialog__footer-button');
-    console.log('✅ Skipped camera/microphone permissions');
-  } catch {
-    console.log('⚠️ No camera/mic permission dialog appeared');
+  async function skipMicCameraDialog(page) {
+    for (let i = 0; i < 2; i++) { // try twice
+      try {
+        const btn = await page.waitForSelector(
+          'span.pepc-permission-dialog__footer-button',
+          { timeout: 5000 }
+        );
+        if (btn) {
+          await btn.click();
+          console.log('✅ Skipped camera/microphone permissions');
+        }
+      } catch {
+        console.log('⚠️ No camera/mic permission dialog appeared');
+      }
+      await page.waitForTimeout(500); // small delay in case the second dialog appears
+    }
   }
+  await skipMicCameraDialog(page);
 
-
-  await page.waitForSelector(
-    'span.pepc-permission-dialog__footer-button',
-    { timeout: 5000 }
-  );
-  await page.click('span.pepc-permission-dialog__footer-button');
-  console.log('✅ Skipped camera/microphone permissions');
-
-  // Wait for the name input (if present)
+  // Enter guest display name
   try {
     await page.waitForSelector('input#input-for-name', { timeout: 10000 });
     const nameInput = await page.$('input#input-for-name');
     if (nameInput) {
       await nameInput.fill(DISPLAY_NAME);
 
-      // Wait until the Join button becomes enabled
       const joinBtn = await page.$('button.preview-join-button');
       await page.waitForFunction(
-        btn => !btn.classList.contains('disabled'),
+        btn => btn && !btn.classList.contains('disabled'),
         joinBtn
       );
 
@@ -78,16 +75,19 @@ async function main() {
     console.log('⚠️ No waiting room detected or already admitted');
   }
 
-  // Open chat panel
+  // Open chat panel (new Zoom UI)
   try {
-    await page.waitForSelector('button[aria-label="Open Chat"]', { timeout: 5000 });
-    await page.click('button[aria-label="Open Chat"]');
+    const chatBtn = await page.waitForSelector(
+      'button.footer-button-base__button[aria-label="open the chat panel"]',
+      { timeout: 10000, state: 'visible' }
+    );
+    await chatBtn.click();
     console.log('✅ Chat panel opened');
   } catch {
-    console.log('⚠️ Chat panel not detected (might be hidden or disabled)');
+    console.log('⚠️ Chat panel button not found');
   }
 
-  // Expose a terminal logger for chat messages
+  // Expose terminal logger for chat messages
   await page.exposeFunction('onNewChat', (msg) => {
     console.log(msg);
   });
@@ -95,21 +95,31 @@ async function main() {
   // Monitor chat messages
   await page.evaluate(() => {
     const seen = new Set();
+    
+    // Get the chat list container
+    const container = document.querySelector('div.new-chat-message__list-container') 
+                       || document.body; // fallback if Zoom uses something else
+
     const observer = new MutationObserver(() => {
-      // Zoom chat messages have various selectors depending on region/UI version
-      document.querySelectorAll('.chat-message__text, .chat-item__chat-info').forEach((el) => {
-        const parent = el.closest('.chat-item__chat-info, .chat-message');
-        const nameEl = parent?.querySelector('.chat-message__sender, .chat-item__sender') || {};
-        const msgText = el.textContent?.trim();
-        const name = nameEl.textContent?.trim() || 'Unknown';
-        const key = `${name}:${msgText}`;
-        if (!seen.has(key) && msgText) {
-          seen.add(key);
-          window.onNewChat(`${name}: ${msgText}`);
-        }
+      container.querySelectorAll('div.new-chat-message__container').forEach(el => {
+        const msgId = el.id;
+        if (seen.has(msgId)) return;  // avoid duplicates
+        seen.add(msgId);
+
+        const ariaLabel = el.getAttribute('aria-label');
+        if (!ariaLabel) return;
+
+        // Match: "USERNAME to Everyone, TIME, MESSAGE"
+        const match = ariaLabel.match(/^(.+?) to .*?, .*?, (.+)$/);
+        if (!match) return;
+
+        const username = match[1];
+        const message = match[2];
+        window.onNewChat(`${username}: ${message}`);
       });
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+
+    observer.observe(container, { childList: true, subtree: true });
   });
 
   console.log('✅ Listening for new chat messages...');
