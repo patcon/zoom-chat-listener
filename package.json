@@ -1,0 +1,14 @@
+{
+  "name": "zoom-chat-listener",
+  "version": "1.0.0",
+  "description": "Headless Zoom meeting chat listener using Playwright",
+  "main": "zoom-chat-listener.js",
+  "type": "module",
+  "scripts": {
+    "start": "node zoom-chat-listener.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "playwright": "^1.48.0"
+  }
+}
