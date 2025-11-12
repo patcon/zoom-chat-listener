@@ -87,8 +87,8 @@ async function main() {
     console.log('⚠️ Chat panel button not found');
   }
 
-  await page.exposeFunction('onNewChat', (text, userid) => {
-    console.log(`UserID ${userid}: ${text}`);
+  await page.exposeFunction('onNewChat', (text) => {
+    console.log(text);
   });
 
   await page.evaluate(() => {
@@ -105,24 +105,26 @@ async function main() {
         // Get message text from aria-label
         const ariaLabel = msgEl.getAttribute('aria-label');
         if (!ariaLabel) return;
-        // e.g., "Patrick Connolly to Everyone, 02:22 PM, testing"
         const match = ariaLabel.match(/^(.+?) to .*?, .*?, (.+)$/);
         if (!match) return;
 
-        const usernameFromLabel = match[1];
         const messageText = match[2];
 
-        // Carefully traverse to the sender span
-        let senderSpan = null;
-        const wrap = msgEl.closest('.new-chat-item__chat-msg-wrap');
-        if (wrap) {
-          senderSpan = wrap.querySelector('.chat-item__sender');
+        // Traverse upward until we find a span with data-userid
+        let parent = msgEl.parentElement;
+        let username = 'unknown';
+        let userid = 'unknown';
+        while (parent) {
+          const senderSpan = parent.querySelector('.chat-item__sender[data-userid]');
+          if (senderSpan) {
+            username = senderSpan.getAttribute('data-name') || senderSpan.textContent || 'unknown';
+            userid = senderSpan.getAttribute('data-userid') || 'unknown';
+            break;
+          }
+          parent = parent.parentElement;
         }
 
-        const userid = senderSpan ? senderSpan.getAttribute('data-userid') : 'unknown';
-        const username = senderSpan ? senderSpan.getAttribute('data-name') : usernameFromLabel;
-
-        window.onNewChat(`${username}: ${messageText}`, userid);
+        window.onNewChat(`${username} (${userid}): ${messageText}`);
       });
     });
 
