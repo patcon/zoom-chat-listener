@@ -87,35 +87,42 @@ async function main() {
     console.log('⚠️ Chat panel button not found');
   }
 
-  // Expose terminal logger for chat messages
-  await page.exposeFunction('onNewChat', (msg) => {
-    console.log(msg);
+  await page.exposeFunction('onNewChat', (text, userid) => {
+    console.log(`UserID ${userid}: ${text}`);
   });
 
-  // Monitor chat messages
   await page.evaluate(() => {
     const seen = new Set();
-    
-    // Get the chat list container
-    const container = document.querySelector('div.new-chat-message__list-container') 
-                       || document.body; // fallback if Zoom uses something else
+
+    const container = document.querySelector('div.new-chat-message__list-container') || document.body;
 
     const observer = new MutationObserver(() => {
-      container.querySelectorAll('div.new-chat-message__container').forEach(el => {
-        const msgId = el.id;
-        if (seen.has(msgId)) return;  // avoid duplicates
+      container.querySelectorAll('div.new-chat-message__container').forEach(msgEl => {
+        const msgId = msgEl.id;
+        if (seen.has(msgId)) return;
         seen.add(msgId);
 
-        const ariaLabel = el.getAttribute('aria-label');
+        // Get message text from aria-label
+        const ariaLabel = msgEl.getAttribute('aria-label');
         if (!ariaLabel) return;
-
-        // Match: "USERNAME to Everyone, TIME, MESSAGE"
+        // e.g., "Patrick Connolly to Everyone, 02:22 PM, testing"
         const match = ariaLabel.match(/^(.+?) to .*?, .*?, (.+)$/);
         if (!match) return;
 
-        const username = match[1];
-        const message = match[2];
-        window.onNewChat(`${username}: ${message}`);
+        const usernameFromLabel = match[1];
+        const messageText = match[2];
+
+        // Carefully traverse to the sender span
+        let senderSpan = null;
+        const wrap = msgEl.closest('.new-chat-item__chat-msg-wrap');
+        if (wrap) {
+          senderSpan = wrap.querySelector('.chat-item__sender');
+        }
+
+        const userid = senderSpan ? senderSpan.getAttribute('data-userid') : 'unknown';
+        const username = senderSpan ? senderSpan.getAttribute('data-name') : usernameFromLabel;
+
+        window.onNewChat(`${username}: ${messageText}`, userid);
       });
     });
 
